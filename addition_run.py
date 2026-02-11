@@ -50,34 +50,71 @@ def train_one_epoch(model, loader, optimizer, device):
 
     The training loop should:
     1) Iterate over batches of tokenized input–target pairs
-    2) Perform a forward pass through the model to compute logits and hidden states. 
-        Hidden states are not important now. 
+    2) Perform a forward pass through the model to compute logits and hidden states.
+        Hidden states are not important now.
     3) Compute a cross-entropy loss between logits and target tokens
     4) Backpropagate the loss and update model parameters
 
     Hint:
-        The model does not need to learn to reproduce the question. Since 
-        the input already contains the question and the task is fixed 
-        (addition), training capacity is better spent learning to generate 
+        The model does not need to learn to reproduce the question. Since
+        the input already contains the question and the task is fixed
+        (addition), training capacity is better spent learning to generate
         the answer.
-    Another Hint: 
-        token id for "=" is 12. 
+    Another Hint:
+        token id for "=" is 12.
     """
-    # # todo
-    # model.train()
-    # total_loss = 0
-    # n_batches = 0
-    # for ...
+    model.train()
+    total_loss = 0
+    n_batches = 0
 
-    # return total_loss / n_batches
+    for batch in loader:
+        # batch[0] contains input tokens, batch[1] contains target tokens
+        input_ids = batch[0].to(device)
+        targets = batch[1].to(device)
 
-    raise NotImplementedError
+        # Forward pass
+        logits, _ = model(input_ids, targets)
+
+        # Compute loss only on the answer part (after "=")
+        # We need to create a mask that ignores positions before and including "="
+        # Create a mask for positions after "=" (token id 12)
+        mask = torch.zeros_like(targets, dtype=torch.bool)
+        for i in range(targets.size(0)):
+            # Find position of "=" token
+            equals_pos = (targets[i] == 12).nonzero(as_tuple=True)[0]
+            if len(equals_pos) > 0:
+                # Mask everything after "=" (we want to predict the answer)
+                mask[i, equals_pos[0] + 1:] = True
+
+        # Reshape logits and targets for loss computation
+        # logits: (batch_size, seq_len, vocab_size)
+        # targets: (batch_size, seq_len)
+        logits_flat = logits.view(-1, logits.size(-1))
+        targets_flat = targets.view(-1)
+        mask_flat = mask.view(-1)
+
+        # Compute cross-entropy loss only on masked positions
+        # Use ignore_index to handle any padding tokens (-1)
+        if mask_flat.any():
+            loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], ignore_index=-1)
+        else:
+            loss = torch.tensor(0.0, device=device, requires_grad=True)
+
+        # Backpropagation
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+        n_batches += 1
+
+    return total_loss / n_batches
 
 
 @torch.no_grad()
 def evaluate_loss(model, loader, device):
     """
-    Evaluate the model’s loss on a dataset.
+    Evaluate the model's loss on a dataset.
 
     The evaluation loop should:
     1) Iterate over batches of tokenized input–target pairs
@@ -88,22 +125,47 @@ def evaluate_loss(model, loader, device):
     5) Accumulate loss over all batches and return the average
 
     Hint:
-        The model does not need to learn to reproduce the question. Since 
-        the input already contains the question and the task is fixed 
-        (addition), training capacity is better spent learning to generate 
+        The model does not need to learn to reproduce the question. Since
+        the input already contains the question and the task is fixed
+        (addition), training capacity is better spent learning to generate
         the answer.
-    Another Hint: 
-        token id for "=" is 12. 
+    Another Hint:
+        token id for "=" is 12.
     """
-    # todo
-    # model.eval()
-    # total_loss = 0
-    # n_batches = 0
-    # for ...
+    model.eval()
+    total_loss = 0
+    n_batches = 0
 
-    # return total_loss / n_batches
+    for batch in loader:
+        # batch[0] contains input tokens, batch[1] contains target tokens
+        input_ids = batch[0].to(device)
+        targets = batch[1].to(device)
 
-    raise NotImplementedError
+        # Forward pass
+        logits, _ = model(input_ids, targets)
+
+        # Compute loss only on the answer part (after "=")
+        # Create a mask for positions after "=" (token id 12)
+        mask = torch.zeros_like(targets, dtype=torch.bool)
+        for i in range(targets.size(0)):
+            # Find position of "=" token
+            equals_pos = (targets[i] == 12).nonzero(as_tuple=True)[0]
+            if len(equals_pos) > 0:
+                # Mask everything after "=" (we want to predict the answer)
+                mask[i, equals_pos[0] + 1:] = True
+
+        # Reshape logits and targets for loss computation
+        logits_flat = logits.view(-1, logits.size(-1))
+        targets_flat = targets.view(-1)
+        mask_flat = mask.view(-1)
+
+        # Compute cross-entropy loss only on masked positions
+        if mask_flat.any():
+            loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], ignore_index=-1)
+            total_loss += loss.item()
+            n_batches += 1
+
+    return total_loss / n_batches if n_batches > 0 else 0.0
 
 
 

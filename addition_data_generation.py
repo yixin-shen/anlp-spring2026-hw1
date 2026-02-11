@@ -14,11 +14,26 @@ def generate_addition_data(n):
     4) Repeat until n unique examples are collected
     5) Return the data formatted as strings of the form "a+b=c"
     """
-    # todo
-    # data = []
-    # ....
-    # return data
-    raise NotImplementedError
+    data = []
+    seen_pairs = set()
+
+    while len(data) < n:
+        # Randomly sample two 4-digit integers
+        a = random.randint(1000, 9999)
+        b = random.randint(1000, 9999)
+
+        # Create a canonical representation (smaller number first) to avoid duplicates
+        pair = tuple(sorted([a, b]))
+
+        # Check if we've already seen this pair
+        if pair not in seen_pairs:
+            seen_pairs.add(pair)
+            # Compute the sum
+            c = a + b
+            # Format as "a+b=c"
+            data.append(f"{a}+{b}={c}")
+
+    return data
 
 def generate_dataset(n, filename, save_dir="data"):
     data = generate_addition_data(n)

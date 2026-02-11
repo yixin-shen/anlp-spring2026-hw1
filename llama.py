@@ -32,7 +32,7 @@ class LayerNorm(torch.nn.Module):
 
     def _norm(self, x):
         """
-        Compute layer normalization by subtracting the mean and dividing by 
+        Compute layer normalization by subtracting the mean and dividing by
         the standard deviation along the last dimension.
 
         Args:
@@ -41,8 +41,11 @@ class LayerNorm(torch.nn.Module):
         Returns:
             torch.Tensor: The normalized tensor.
         """
-        # todo
-        raise NotImplementedError
+        # Compute mean and variance along the last dimension
+        mean = x.mean(dim=-1, keepdim=True)
+        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        # Normalize: (x - mean) / sqrt(var + eps)
+        return (x - mean) / torch.sqrt(var + self.eps)
 
     def forward(self, x):
         """
@@ -105,8 +108,28 @@ class Attention(nn.Module):
         An optimal implementation will compute attention for all heads
         jointly using matrix/tensor operations.
         '''
-        # todo
-        raise NotImplementedError
+        # Compute scaled dot product: Q @ K^T / sqrt(d_k)
+        # query, key, value: (bs, n_local_heads, seqlen, head_dim)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        # scores: (bs, n_local_heads, seqlen, seqlen)
+
+        # Apply causal mask if needed
+        if self.causal:
+            seqlen = query.size(2)
+            # Mask out future positions (set them to -inf before softmax)
+            scores = scores.masked_fill(self.causal_mask[:seqlen, :seqlen] == 0, float('-inf'))
+
+        # Apply softmax to get attention weights
+        attn_weights = F.softmax(scores, dim=-1)
+
+        # Apply dropout
+        attn_weights = self.attn_dropout(attn_weights)
+
+        # Multiply by values
+        output = torch.matmul(attn_weights, value)
+        # output: (bs, n_local_heads, seqlen, head_dim)
+
+        return output
 
 
     def forward(
@@ -210,8 +233,13 @@ class LlamaLayer(nn.Module):
         5) add a residual connection from the unnormalized self-attention output to the
            output of the feed-forward network
         '''
-        # todo
-        raise NotImplementedError
+        # 1-3: Layer norm -> attention -> residual connection
+        h = x + self.attention(self.attention_norm(x))
+
+        # 4-5: Layer norm -> feed-forward -> residual connection
+        out = h + self.feed_forward(self.ffn_norm(h))
+
+        return out
 
 class Llama(LlamaPreTrainedModel):
     def __init__(self, config: LlamaConfig):
@@ -301,11 +329,34 @@ class Llama(LlamaPreTrainedModel):
                 6) Renormalize the remaining probabilities so they sum to 1.
                 7) Sample from this filtered probability distribution.
                 '''
-                # todo 
+                # 1. Apply temperature scaling
+                logits = logits / temperature
 
-                raise NotImplementedError
-                # map to original vocab indices
-                idx_next = None
+                # 2. Apply softmax to get probabilities
+                probs = F.softmax(logits, dim=-1)
+
+                # 3. Sort tokens by descending probability
+                probs_sorted, probs_idx = torch.sort(probs, dim=-1, descending=True)
+
+                # 4. Compute cumulative probability distribution
+                probs_cumsum = torch.cumsum(probs_sorted, dim=-1)
+
+                # 5. Create mask for tokens outside the nucleus
+                # We want to keep tokens until cumsum exceeds top_p
+                # Shift by one to keep at least one token and the first token that exceeds top_p
+                mask = probs_cumsum - probs_sorted > top_p
+
+                # 6. Mask out probabilities outside the nucleus
+                probs_sorted[mask] = 0.0
+
+                # 7. Renormalize the probabilities
+                probs_sorted = probs_sorted / probs_sorted.sum(dim=-1, keepdim=True)
+
+                # 8. Sample from the filtered distribution
+                next_token_relative_idx = torch.multinomial(probs_sorted, num_samples=1)
+
+                # 9. Map to original vocab indices
+                idx_next = torch.gather(probs_idx, -1, next_token_relative_idx)
             
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)

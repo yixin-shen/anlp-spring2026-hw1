@@ -50,10 +50,6 @@ def apply_rotary_emb(
 
     _, seqlen, _, _ = query.shape
     device = query.device
-    # todo
-    #
-    # Please refer to Lecture 5 slides in https://cmu-l3.github.io/anlp-fall2025/static_files/anlp-f2025-05-transformers.pdf
-    # and Section 3 in https://arxiv.org/abs/2104.09864.
 
     # reshape xq and xk to match the complex representation
     query_real, query_imag = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
@@ -64,12 +60,48 @@ def apply_rotary_emb(
     # First, compute the trigonometric values in the second and fourth columns in
     # slide 49 (linked above).
 
+    # Compute frequencies: theta^(-2i/d) for i in [0, head_dim/2)
+    # head_dim is the full dimension, so head_dim/2 pairs
+    dim = head_dim
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, device=device).float() / dim))
+
+    # Compute position indices [0, 1, 2, ..., seqlen-1]
+    t = torch.arange(seqlen, device=device).float()
+
+    # Compute angles: outer product of positions and frequencies
+    # freqs shape: (dim/2,), t shape: (seqlen,)
+    # Result shape: (seqlen, dim/2)
+    freqs = torch.outer(t, freqs)
+
+    # Compute cos and sin
+    freqs_cos = torch.cos(freqs)  # (seqlen, dim/2)
+    freqs_sin = torch.sin(freqs)  # (seqlen, dim/2)
+
+    # Reshape for broadcasting to match query/key shapes
+    # query_real, query_imag shape: (batch_size, seqlen, n_heads, dim/2)
+    # We need freqs_cos/sin to be broadcastable: (1, seqlen, 1, dim/2)
+    freqs_cos = freqs_cos.unsqueeze(0).unsqueeze(2)  # (1, seqlen, 1, dim/2)
+    freqs_sin = freqs_sin.unsqueeze(0).unsqueeze(2)  # (1, seqlen, 1, dim/2)
+
     # Then, combine these trigonometric values with the tensors query_real, query_imag,
     # key_real, and key_imag.
 
-    raise NotImplementedError
+    # Apply rotation:
+    # real' = real * cos - imag * sin
+    # imag' = real * sin + imag * cos
+    query_out_real = query_real * freqs_cos - query_imag * freqs_sin
+    query_out_imag = query_real * freqs_sin + query_imag * freqs_cos
 
-    query_out = None
-    key_out = None
+    key_out_real = key_real * freqs_cos - key_imag * freqs_sin
+    key_out_imag = key_real * freqs_sin + key_imag * freqs_cos
+
+    # Stack real and imaginary parts and reshape back to original shape
+    query_out = torch.stack([query_out_real, query_out_imag], dim=-1).flatten(-2)
+    key_out = torch.stack([key_out_real, key_out_imag], dim=-1).flatten(-2)
+
+    # Cast back to original dtype
+    query_out = query_out.type_as(query)
+    key_out = key_out.type_as(key)
+
     # Return the rotary position embeddings for the query and key tensors
     return query_out, key_out
