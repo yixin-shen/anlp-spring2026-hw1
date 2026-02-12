@@ -78,13 +78,15 @@ def train_one_epoch(model, loader, optimizer, device):
         # Compute loss only on the answer part (after "=")
         # We need to create a mask that ignores positions before and including "="
         # Create a mask for positions after "=" (token id 12)
+        # Vectorized version for efficiency
         mask = torch.zeros_like(targets, dtype=torch.bool)
-        for i in range(targets.size(0)):
-            # Find position of "=" token
-            equals_pos = (targets[i] == 12).nonzero(as_tuple=True)[0]
-            if len(equals_pos) > 0:
-                # Mask everything after "=" (we want to predict the answer)
-                mask[i, equals_pos[0] + 1:] = True
+        equals_mask = (targets == 12)
+        # For each row, find the first occurrence of "=" and create cumsum mask
+        equals_positions = equals_mask.float().argmax(dim=1)  # First position of "="
+        # Create position indices
+        position_indices = torch.arange(targets.size(1), device=targets.device).unsqueeze(0)
+        # Mask everything after "=" position
+        mask = position_indices > equals_positions.unsqueeze(1)
 
         # Reshape logits and targets for loss computation
         # logits: (batch_size, seq_len, vocab_size)
@@ -146,13 +148,15 @@ def evaluate_loss(model, loader, device):
 
         # Compute loss only on the answer part (after "=")
         # Create a mask for positions after "=" (token id 12)
+        # Vectorized version for efficiency
         mask = torch.zeros_like(targets, dtype=torch.bool)
-        for i in range(targets.size(0)):
-            # Find position of "=" token
-            equals_pos = (targets[i] == 12).nonzero(as_tuple=True)[0]
-            if len(equals_pos) > 0:
-                # Mask everything after "=" (we want to predict the answer)
-                mask[i, equals_pos[0] + 1:] = True
+        equals_mask = (targets == 12)
+        # For each row, find the first occurrence of "=" and create cumsum mask
+        equals_positions = equals_mask.float().argmax(dim=1)  # First position of "="
+        # Create position indices
+        position_indices = torch.arange(targets.size(1), device=targets.device).unsqueeze(0)
+        # Mask everything after "=" position
+        mask = position_indices > equals_positions.unsqueeze(1)
 
         # Reshape logits and targets for loss computation
         logits_flat = logits.view(-1, logits.size(-1))
