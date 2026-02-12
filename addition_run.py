@@ -50,19 +50,27 @@ def train_one_epoch(model, loader, optimizer, device):
 
     The training loop should:
     1) Iterate over batches of tokenized input–target pairs
-    2) Perform a forward pass through the model to compute logits and hidden states.
-        Hidden states are not important now.
+    2) Perform a forward pass through the model to compute logits and hidden states. 
+        Hidden states are not important now. 
     3) Compute a cross-entropy loss between logits and target tokens
     4) Backpropagate the loss and update model parameters
 
     Hint:
-        The model does not need to learn to reproduce the question. Since
-        the input already contains the question and the task is fixed
-        (addition), training capacity is better spent learning to generate
+        The model does not need to learn to reproduce the question. Since 
+        the input already contains the question and the task is fixed 
+        (addition), training capacity is better spent learning to generate 
         the answer.
-    Another Hint:
-        token id for "=" is 12.
+    Another Hint: 
+        token id for "=" is 12. 
     """
+    # # todo
+    # model.train()
+    # total_loss = 0
+    # n_batches = 0
+    # for ...
+
+    # return total_loss / n_batches
+    
     model.train()
     total_loss = 0
     n_batches = 0
@@ -76,15 +84,20 @@ def train_one_epoch(model, loader, optimizer, device):
         logits, _ = model(input_ids, targets)
 
         # Compute loss only on the answer part (after "=")
-        # We need to create a mask that ignores positions before and including "="
         # Create a mask for positions after "=" (token id 12)
         # Vectorized version for efficiency
-        mask = torch.zeros_like(targets, dtype=torch.bool)
         equals_mask = (targets == 12)
         # For each row, find the first occurrence of "=" and create cumsum mask
         equals_positions = equals_mask.float().argmax(dim=1)  # First position of "="
+        has_equals = equals_mask.any(dim=1)
+        seq_len = targets.size(1)
+        equals_positions = torch.where(
+            has_equals,
+            equals_positions,
+            torch.full_like(equals_positions, seq_len)
+        )
         # Create position indices
-        position_indices = torch.arange(targets.size(1), device=targets.device).unsqueeze(0)
+        position_indices = torch.arange(seq_len, device=targets.device).unsqueeze(0)
         # Mask everything after "=" position
         mask = position_indices > equals_positions.unsqueeze(1)
 
@@ -110,13 +123,13 @@ def train_one_epoch(model, loader, optimizer, device):
         total_loss += loss.item()
         n_batches += 1
 
-    return total_loss / n_batches
+    return total_loss / n_batches if n_batches > 0 else 0.0
 
 
 @torch.no_grad()
 def evaluate_loss(model, loader, device):
     """
-    Evaluate the model's loss on a dataset.
+    Evaluate the model’s loss on a dataset.
 
     The evaluation loop should:
     1) Iterate over batches of tokenized input–target pairs
@@ -127,13 +140,21 @@ def evaluate_loss(model, loader, device):
     5) Accumulate loss over all batches and return the average
 
     Hint:
-        The model does not need to learn to reproduce the question. Since
-        the input already contains the question and the task is fixed
-        (addition), training capacity is better spent learning to generate
+        The model does not need to learn to reproduce the question. Since 
+        the input already contains the question and the task is fixed 
+        (addition), training capacity is better spent learning to generate 
         the answer.
-    Another Hint:
-        token id for "=" is 12.
+    Another Hint: 
+        token id for "=" is 12. 
     """
+    # todo
+    # model.eval()
+    # total_loss = 0
+    # n_batches = 0
+    # for ...
+
+    # return total_loss / n_batches
+
     model.eval()
     total_loss = 0
     n_batches = 0
@@ -149,12 +170,18 @@ def evaluate_loss(model, loader, device):
         # Compute loss only on the answer part (after "=")
         # Create a mask for positions after "=" (token id 12)
         # Vectorized version for efficiency
-        mask = torch.zeros_like(targets, dtype=torch.bool)
         equals_mask = (targets == 12)
         # For each row, find the first occurrence of "=" and create cumsum mask
         equals_positions = equals_mask.float().argmax(dim=1)  # First position of "="
+        has_equals = equals_mask.any(dim=1)
+        seq_len = targets.size(1)
+        equals_positions = torch.where(
+            has_equals,
+            equals_positions,
+            torch.full_like(equals_positions, seq_len)
+        )
         # Create position indices
-        position_indices = torch.arange(targets.size(1), device=targets.device).unsqueeze(0)
+        position_indices = torch.arange(seq_len, device=targets.device).unsqueeze(0)
         # Mask everything after "=" position
         mask = position_indices > equals_positions.unsqueeze(1)
 
