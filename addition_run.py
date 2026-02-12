@@ -424,7 +424,7 @@ def load_config(save_dir, filename):
 
 def load_model(save_dir, filename, model, device):
     filepath = os.path.join(save_dir, filename)
-    checkpoint = torch.load(filepath, map_location=device)
+    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
 
     state_dict = checkpoint["model"]
 
