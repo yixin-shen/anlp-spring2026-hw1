@@ -369,6 +369,8 @@ def check(dataset_decode, generated_tokens):
     """
     out_tokens = trim_padding(generated_tokens[0])
     out_tokens = split_before(out_tokens, 0)
+    # Filter out padding tokens (0) before decoding
+    out_tokens = [t for t in out_tokens if t != 0]
     out_text = dataset_decode(out_tokens)
     # print(f"out text is {out_text}")
 
