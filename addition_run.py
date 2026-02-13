@@ -92,7 +92,16 @@ def train_one_epoch(model, loader, optimizer, device):
             ignore_index=IGNORE_ID
         )
 
+        # Check for NaN/Inf before backward
+        if not torch.isfinite(loss):
+            print(f"Warning: loss is {loss.item()}, skipping batch")
+            continue
+
         loss.backward()
+
+        # Gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
 
         total_loss += loss.item()
@@ -227,8 +236,12 @@ def model_training(args):
         "save_dir" : args.save_dir
     }
 
-    # Create model 
+    # Create model
     device = torch.device("cuda" if args.use_gpu and torch.cuda.is_available() else "cpu")
+
+    # Clear GPU cache if using CUDA
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     model = create_model(model_config)
     model = model.to(device)
@@ -248,8 +261,8 @@ def model_training(args):
     train_dataset = addition_lib.create_datasets(args.train_file)
     val_dataset = addition_lib.create_datasets(args.val_file)
 
-    train_loader = DataLoader(train_dataset, batch_size=training_config["batch_size"], shuffle=True, num_workers=4)
-    val_loader   = DataLoader(val_dataset, batch_size=training_config["batch_size"], shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=training_config["batch_size"], shuffle=True, num_workers=2)
+    val_loader   = DataLoader(val_dataset, batch_size=training_config["batch_size"], shuffle=False, num_workers=2)
 
     optimizer = AdamW(model.parameters(), lr=1e-3)
 
