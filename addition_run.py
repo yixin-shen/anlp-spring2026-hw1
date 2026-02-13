@@ -87,7 +87,7 @@ def train_one_epoch(model, loader, optimizer, device):
         logits_flat = logits.view(-1, v)
         y_flat = y.view(-1)
         mask_flat = answer_mask.view(-1)
-        valid_mask = mask_flat & (y_flat >= 0)
+        valid_mask = mask_flat & (y_flat >= 0) & (y_flat < v)
 
         if valid_mask.any():
             loss = F.cross_entropy(logits_flat[valid_mask], y_flat[valid_mask])
@@ -152,7 +152,7 @@ def evaluate_loss(model, loader, device):
         y_flat = y.view(-1)
         mask_flat = answer_mask.view(-1)
 
-        valid_mask = mask_flat & (y_flat >= 0)
+        valid_mask = mask_flat & (y_flat >= 0) & (y_flat < v)
 
         if valid_mask.any():
             loss = F.cross_entropy(logits_flat[valid_mask], y_flat[valid_mask])
