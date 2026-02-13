@@ -385,8 +385,14 @@ def generate(model, prompt_tokens, max_new_tokens=10, eos_id=None, device='cpu',
 
             generated = torch.cat([generated, next_token], dim=1)
 
-            if eos_id is not None and next_token.item() == eos_id:
-                break
+            # For batch generation, check if all sequences have generated eos_id
+            if eos_id is not None:
+                if next_token.numel() == 1:  # Single sample
+                    if next_token.item() == eos_id:
+                        break
+                else:  # Batch - check if all generated eos
+                    if (next_token == eos_id).all():
+                        break
 
     return generated
 
@@ -501,7 +507,7 @@ def test_model(
                 model,
                 batch_prompt_tokens,
                 max_new_tokens=max_gen_len,
-                eos_id=eos_id,
+                eos_id=0,  # Stop when model generates padding token (0)
                 device=device
             )
 
