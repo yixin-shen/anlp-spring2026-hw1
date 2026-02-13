@@ -9,7 +9,7 @@ import math
 import argparse
 
 import matplotlib
-matplotlib.use("Agg")  # Avoid tkinter/thread issues
+matplotlib.use("Agg")  # <- add this to avoid tkinter/thread issues
 import matplotlib.pyplot as plt
 
 from addition_data_generation import generate_dataset
@@ -18,7 +18,9 @@ from optimizer import AdamW
 from llama import Llama
 from config import LlamaConfig
 
+from torch.nn import functional as F
 import torch.nn.functional as F
+# from torch.optim import AdamW
 from tqdm import tqdm
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
@@ -64,69 +66,49 @@ def train_one_epoch(model, loader, optimizer, device):
         token id for "=" is 12. 
     """
     # # todo
-    # model.train()
-    # total_loss = 0
-    # n_batches = 0
-    # for ...
-
-    # return total_loss / n_batches
-    
     model.train()
     total_loss = 0
     n_batches = 0
 
-    for batch in loader:
-        # batch[0] contains input tokens, batch[1] contains target tokens
-        input_ids = batch[0].to(device)
-        targets = batch[1].to(device)
+    eq_id = 12 #  token id for "=" is 12
 
-        # Forward pass
-        logits, _ = model(input_ids, targets)
+    for x, y in loader:
+        x = x.to(device) # (b, t)
+        y = y.to(device) # (b, t)
+ 
+        optimizer.zero_grad(set_to_none=True)
 
-        # Compute loss only on the answer part (after "=")
-        # Create a mask for positions after "=" (token id 12)
-        # Vectorized version for efficiency
-        equals_mask = (targets == 12)
-        # For each row, find the first occurrence of "=" and create cumsum mask
-        equals_positions = equals_mask.float().argmax(dim=1)  # First position of "="
-        has_equals = equals_mask.any(dim=1)
-        seq_len = targets.size(1)
-        equals_positions = torch.where(
-            has_equals,
-            equals_positions,
-            torch.full_like(equals_positions, seq_len)
-        )
-        # Create position indices
-        position_indices = torch.arange(seq_len, device=targets.device).unsqueeze(0)
-        # Mask everything after "=" position
-        mask = position_indices > equals_positions.unsqueeze(1)
+        logits, _ = model(x, y)
+        b, t, v = logits.shape
 
-        # Reshape logits and targets for loss computation
-        # logits: (batch_size, seq_len, vocab_size)
-        # targets: (batch_size, seq_len)
-        vocab_size = logits.size(-1)
-        logits_flat = logits.view(-1, vocab_size)
-        targets_flat = targets.view(-1)
-        mask_flat = mask.view(-1)
+        # only train on answer tokens (positions after "=")
+        eq_pos = (y == eq_id).int().argmax(dim=1) # (b,) assumes exactly one "=" per sequence
 
-        # Compute cross-entropy loss only on masked positions
-        # Filter out invalid targets (padding and out-of-vocab)
-        valid_mask = mask_flat & (targets_flat >= 0) & (targets_flat < vocab_size)
+        pos = torch.arange(t, device=device).unsqueeze(0).expand(b, t)  # (b, t)
+        answer_mask = pos > eq_pos.unsqueeze(1)  # (b, t)
 
-        if valid_mask.any():
-            loss = F.cross_entropy(logits_flat[valid_mask], targets_flat[valid_mask], reduction='mean')
+        logits_flat = logits.reshape(b * t, v)
+        y_flat = y.reshape(b * t)
+        mask_flat = answer_mask.reshape(b * t)
+
+        sel = mask_flat  # bool, shape (b*t,)
+
+        # train only on valid answer targets (dataset uses -1 as "ignore")
+        sel = mask_flat & (y_flat >= 0) & (y_flat < v)
+
+        if sel.any():
+            loss = F.cross_entropy(logits_flat[sel], y_flat[sel], reduction="mean")
         else:
+            # no answer tokens in this batch (should be rare); make a zero loss
             loss = logits_flat.sum() * 0.0
 
-        # Backpropagation
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
         n_batches += 1
 
-    return total_loss / n_batches if n_batches > 0 else 0.0
+    return total_loss / n_batches
 
 
 @torch.no_grad()
@@ -151,60 +133,43 @@ def evaluate_loss(model, loader, device):
         token id for "=" is 12. 
     """
     # todo
-    # model.eval()
-    # total_loss = 0
-    # n_batches = 0
-    # for ...
-
-    # return total_loss / n_batches
-
     model.eval()
     total_loss = 0
     n_batches = 0
 
-    for batch in loader:
-        # batch[0] contains input tokens, batch[1] contains target tokens
-        input_ids = batch[0].to(device)
-        targets = batch[1].to(device)
+    eq_id = 12
 
-        # Forward pass
-        logits, _ = model(input_ids, targets)
+    for x, y in loader:
+        x = x.to(device) # # (b, t)
+        y = y.to(device)
 
-        # Compute loss only on the answer part (after "=")
-        # Create a mask for positions after "=" (token id 12)
-        # Vectorized version for efficiency
-        equals_mask = (targets == 12)
-        # For each row, find the first occurrence of "=" and create cumsum mask
-        equals_positions = equals_mask.float().argmax(dim=1)  # First position of "="
-        has_equals = equals_mask.any(dim=1)
-        seq_len = targets.size(1)
-        equals_positions = torch.where(
-            has_equals,
-            equals_positions,
-            torch.full_like(equals_positions, seq_len)
-        )
-        # Create position indices
-        position_indices = torch.arange(seq_len, device=targets.device).unsqueeze(0)
-        # Mask everything after "=" position
-        mask = position_indices > equals_positions.unsqueeze(1)
+        logits, _ = model(x, targets=y) # (b, t, vocab)
 
-        # Reshape logits and targets for loss computation
-        vocab_size = logits.size(-1)
-        logits_flat = logits.view(-1, vocab_size)
-        targets_flat = targets.view(-1)
-        mask_flat = mask.view(-1)
+        b, t, v = logits.shape
 
-        # Compute cross-entropy loss only on masked positions
-        # Filter out invalid targets (padding and out-of-vocab)
-        valid_mask = mask_flat & (targets_flat >= 0) & (targets_flat < vocab_size)
+        eq_pos = (y == eq_id).int().argmax(dim=1) # (b,)
+        pos = torch.arange(t, device=device).unsqueeze(0).expand(b, t)
+        answer_mask = (pos > eq_pos.unsqueeze(1)) # (b, t)
 
-        if valid_mask.any():
-            loss = F.cross_entropy(logits_flat[valid_mask], targets_flat[valid_mask], reduction='mean')
-            total_loss += loss.item()
-            n_batches += 1
+        logits_flat = logits.reshape(b * t, v)
+        y_flat = y.reshape(b * t)
+        mask_flat = answer_mask.reshape(b * t)
 
-    return total_loss / n_batches if n_batches > 0 else 0.0
+        sel = mask_flat  # bool, shape (b*t,)
 
+        # train only on valid answer targets (dataset uses -1 as "ignore")
+        sel = mask_flat & (y_flat >= 0) & (y_flat < v)
+
+        if sel.any():
+            loss = F.cross_entropy(logits_flat[sel], y_flat[sel], reduction="mean")
+        else:
+            # no answer tokens in this batch (should be rare); make a zero loss
+            loss = logits_flat.sum() * 0.0
+
+        total_loss += loss.item()
+        n_batches += 1
+
+    return total_loss / n_batches
 
 
 # ----- Saving Checkpoints and Plots -----
@@ -303,6 +268,9 @@ def model_training(args):
     train_loader = DataLoader(train_dataset, batch_size=training_config["batch_size"], shuffle=True, num_workers=4)
     val_loader   = DataLoader(val_dataset, batch_size=training_config["batch_size"], shuffle=False, num_workers=4)
 
+    print("AdamW symbol:", AdamW)
+    import inspect
+    print("AdamW defined in:", inspect.getfile(AdamW))
     optimizer = AdamW(model.parameters(), lr=1e-3)
 
     # Start model training
@@ -376,8 +344,6 @@ def check(dataset_decode, generated_tokens):
     """
     out_tokens = trim_padding(generated_tokens[0])
     out_tokens = split_before(out_tokens, 0)
-    # Filter out padding tokens (0) before decoding
-    out_tokens = [t for t in out_tokens if t != 0]
     out_text = dataset_decode(out_tokens)
     # print(f"out text is {out_text}")
 
