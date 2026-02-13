@@ -8,6 +8,8 @@ import re
 import math
 import argparse
 
+import matplotlib
+matplotlib.use("Agg")  # Avoid tkinter/thread issues
 import matplotlib.pyplot as plt
 
 from addition_data_generation import generate_dataset
@@ -16,9 +18,7 @@ from optimizer import AdamW
 from llama import Llama
 from config import LlamaConfig
 
-from torch.nn import functional as F
 import torch.nn.functional as F
-from torch.optim import AdamW
 from tqdm import tqdm
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
@@ -104,16 +104,19 @@ def train_one_epoch(model, loader, optimizer, device):
         # Reshape logits and targets for loss computation
         # logits: (batch_size, seq_len, vocab_size)
         # targets: (batch_size, seq_len)
-        logits_flat = logits.view(-1, logits.size(-1))
+        vocab_size = logits.size(-1)
+        logits_flat = logits.view(-1, vocab_size)
         targets_flat = targets.view(-1)
         mask_flat = mask.view(-1)
 
         # Compute cross-entropy loss only on masked positions
-        # Use ignore_index to handle any padding tokens (-1)
-        if mask_flat.any():
-            loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], ignore_index=-1)
+        # Filter out invalid targets (padding and out-of-vocab)
+        valid_mask = mask_flat & (targets_flat >= 0) & (targets_flat < vocab_size)
+
+        if valid_mask.any():
+            loss = F.cross_entropy(logits_flat[valid_mask], targets_flat[valid_mask], reduction='mean')
         else:
-            loss = torch.tensor(0.0, device=device, requires_grad=True)
+            loss = logits_flat.sum() * 0.0
 
         # Backpropagation
         optimizer.zero_grad()
@@ -186,13 +189,17 @@ def evaluate_loss(model, loader, device):
         mask = position_indices > equals_positions.unsqueeze(1)
 
         # Reshape logits and targets for loss computation
-        logits_flat = logits.view(-1, logits.size(-1))
+        vocab_size = logits.size(-1)
+        logits_flat = logits.view(-1, vocab_size)
         targets_flat = targets.view(-1)
         mask_flat = mask.view(-1)
 
         # Compute cross-entropy loss only on masked positions
-        if mask_flat.any():
-            loss = F.cross_entropy(logits_flat[mask_flat], targets_flat[mask_flat], ignore_index=-1)
+        # Filter out invalid targets (padding and out-of-vocab)
+        valid_mask = mask_flat & (targets_flat >= 0) & (targets_flat < vocab_size)
+
+        if valid_mask.any():
+            loss = F.cross_entropy(logits_flat[valid_mask], targets_flat[valid_mask], reduction='mean')
             total_loss += loss.item()
             n_batches += 1
 
