@@ -70,37 +70,27 @@ def train_one_epoch(model, loader, optimizer, device):
     total_loss = 0
     n_batches = 0
 
-    eq_id = 12 #  token id for "=" is 12
+    EQ_ID = 12  # token id for "=" is 12
+    IGNORE_ID = -100  
 
     for x, y in loader:
-        x = x.to(device) # (b, t)
-        y = y.to(device) # (b, t)
- 
+        x, y = x.to(device), y.to(device)
         optimizer.zero_grad(set_to_none=True)
 
         logits, _ = model(x, y)
         b, t, v = logits.shape
 
-        # only train on answer tokens (positions after "=")
-        eq_pos = (y == eq_id).int().argmax(dim=1) # (b,) assumes exactly one "=" per sequence
+        eq_positions = (y == EQ_ID).long().argmax(dim=1)  # (b,)
+        positions = torch.arange(t, device=device).unsqueeze(0)  # (1, t)
 
-        pos = torch.arange(t, device=device).unsqueeze(0).expand(b, t)  # (b, t)
-        answer_mask = pos > eq_pos.unsqueeze(1)  # (b, t)
+        y_masked = y.clone()
+        y_masked[positions <= eq_positions.unsqueeze(1)] = IGNORE_ID
 
-        logits_flat = logits.reshape(b * t, v)
-        y_flat = y.reshape(b * t)
-        mask_flat = answer_mask.reshape(b * t)
-
-        sel = mask_flat  # bool, shape (b*t,)
-
-        # train only on valid answer targets (dataset uses -1 as "ignore")
-        sel = mask_flat & (y_flat >= 0) & (y_flat < v)
-
-        if sel.any():
-            loss = F.cross_entropy(logits_flat[sel], y_flat[sel], reduction="mean")
-        else:
-            # no answer tokens in this batch (should be rare); make a zero loss
-            loss = logits_flat.sum() * 0.0
+        loss = F.cross_entropy(
+            logits.view(-1, v),
+            y_masked.view(-1),
+            ignore_index=IGNORE_ID
+        )
 
         loss.backward()
         optimizer.step()
@@ -137,34 +127,27 @@ def evaluate_loss(model, loader, device):
     total_loss = 0
     n_batches = 0
 
-    eq_id = 12
+    EQ_ID = 12
+    IGNORE_ID = -100
 
     for x, y in loader:
-        x = x.to(device) # # (b, t)
-        y = y.to(device)
-
-        logits, _ = model(x, targets=y) # (b, t, vocab)
+        x, y = x.to(device), y.to(device)
+        logits, _ = model(x, targets=y)
 
         b, t, v = logits.shape
 
-        eq_pos = (y == eq_id).int().argmax(dim=1) # (b,)
-        pos = torch.arange(t, device=device).unsqueeze(0).expand(b, t)
-        answer_mask = (pos > eq_pos.unsqueeze(1)) # (b, t)
+        # Create mask
+        eq_positions = (y == EQ_ID).long().argmax(dim=1)
+        positions = torch.arange(t, device=device).unsqueeze(0)
 
-        logits_flat = logits.reshape(b * t, v)
-        y_flat = y.reshape(b * t)
-        mask_flat = answer_mask.reshape(b * t)
+        y_masked = y.clone()
+        y_masked[positions <= eq_positions.unsqueeze(1)] = IGNORE_ID
 
-        sel = mask_flat  # bool, shape (b*t,)
-
-        # train only on valid answer targets (dataset uses -1 as "ignore")
-        sel = mask_flat & (y_flat >= 0) & (y_flat < v)
-
-        if sel.any():
-            loss = F.cross_entropy(logits_flat[sel], y_flat[sel], reduction="mean")
-        else:
-            # no answer tokens in this batch (should be rare); make a zero loss
-            loss = logits_flat.sum() * 0.0
+        loss = F.cross_entropy(
+            logits.view(-1, v),
+            y_masked.view(-1),
+            ignore_index=IGNORE_ID
+        )
 
         total_loss += loss.item()
         n_batches += 1
@@ -268,9 +251,6 @@ def model_training(args):
     train_loader = DataLoader(train_dataset, batch_size=training_config["batch_size"], shuffle=True, num_workers=4)
     val_loader   = DataLoader(val_dataset, batch_size=training_config["batch_size"], shuffle=False, num_workers=4)
 
-    print("AdamW symbol:", AdamW)
-    import inspect
-    print("AdamW defined in:", inspect.getfile(AdamW))
     optimizer = AdamW(model.parameters(), lr=1e-3)
 
     # Start model training
@@ -385,14 +365,8 @@ def generate(model, prompt_tokens, max_new_tokens=10, eos_id=None, device='cpu',
 
             generated = torch.cat([generated, next_token], dim=1)
 
-            # For batch generation, check if all sequences have generated eos_id
-            if eos_id is not None:
-                if next_token.numel() == 1:  # Single sample
-                    if next_token.item() == eos_id:
-                        break
-                else:  # Batch - check if all generated eos
-                    if (next_token == eos_id).all():
-                        break
+            if eos_id is not None and next_token.item() == eos_id:
+                break
 
     return generated
 
@@ -405,7 +379,7 @@ def load_config(save_dir, filename):
 
 def load_model(save_dir, filename, model, device):
     filepath = os.path.join(save_dir, filename)
-    checkpoint = torch.load(filepath, map_location=device, weights_only=False)
+    checkpoint = torch.load(filepath, map_location=device)
 
     state_dict = checkpoint["model"]
 
@@ -507,7 +481,7 @@ def test_model(
                 model,
                 batch_prompt_tokens,
                 max_new_tokens=max_gen_len,
-                eos_id=0,  # Stop when model generates padding token (0)
+                eos_id=eos_id,
                 device=device
             )
 
