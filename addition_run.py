@@ -71,7 +71,6 @@ def train_one_epoch(model, loader, optimizer, device):
     n_batches = 0
 
     EQ_ID = 12  # token id for "=" is 12
-    IGNORE_ID = -100  
 
     for x, y in loader:
         x, y = x.to(device), y.to(device)
@@ -80,26 +79,27 @@ def train_one_epoch(model, loader, optimizer, device):
         logits, _ = model(x, y)
         b, t, v = logits.shape
 
-        eq_positions = (y == EQ_ID).long().argmax(dim=1)  # (b,)
-        positions = torch.arange(t, device=device).unsqueeze(0)  # (1, t)
+        eq_positions = (y == EQ_ID).long().argmax(dim=1)   
+        positions = torch.arange(t, device=device).unsqueeze(0)  
+        answer_mask = positions > eq_positions.unsqueeze(1)  
 
-        y_masked = y.clone()
-        y_masked[positions <= eq_positions.unsqueeze(1)] = IGNORE_ID
+        # flatten for loss computation
+        logits_flat = logits.view(-1, v)
+        y_flat = y.view(-1)
+        mask_flat = answer_mask.view(-1)
+        valid_mask = mask_flat & (y_flat >= 0)
 
-        loss = F.cross_entropy(
-            logits.view(-1, v),
-            y_masked.view(-1),
-            ignore_index=IGNORE_ID
-        )
+        if valid_mask.any():
+            loss = F.cross_entropy(logits_flat[valid_mask], y_flat[valid_mask])
+        else:
+            loss = torch.tensor(0.0, device=device, requires_grad=True)
 
-        # Check for NaN/Inf before backward
         if not torch.isfinite(loss):
             print(f"Warning: loss is {loss.item()}, skipping batch")
             continue
 
         loss.backward()
 
-        # Gradient clipping for stability
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
         optimizer.step()
@@ -137,7 +137,6 @@ def evaluate_loss(model, loader, device):
     n_batches = 0
 
     EQ_ID = 12
-    IGNORE_ID = -100
 
     for x, y in loader:
         x, y = x.to(device), y.to(device)
@@ -145,18 +144,20 @@ def evaluate_loss(model, loader, device):
 
         b, t, v = logits.shape
 
-        # Create mask
         eq_positions = (y == EQ_ID).long().argmax(dim=1)
         positions = torch.arange(t, device=device).unsqueeze(0)
+        answer_mask = positions > eq_positions.unsqueeze(1)
 
-        y_masked = y.clone()
-        y_masked[positions <= eq_positions.unsqueeze(1)] = IGNORE_ID
+        logits_flat = logits.view(-1, v)
+        y_flat = y.view(-1)
+        mask_flat = answer_mask.view(-1)
 
-        loss = F.cross_entropy(
-            logits.view(-1, v),
-            y_masked.view(-1),
-            ignore_index=IGNORE_ID
-        )
+        valid_mask = mask_flat & (y_flat >= 0)
+
+        if valid_mask.any():
+            loss = F.cross_entropy(logits_flat[valid_mask], y_flat[valid_mask])
+        else:
+            loss = torch.tensor(0.0, device=device)
 
         total_loss += loss.item()
         n_batches += 1
