@@ -1,0 +1,8 @@
+{
+    "capacity": 1000,
+    "n_epochs": 10,
+    "batch_size": 1024,
+    "save_dir": "addition_models/test",
+    "model_parameters": 25200,
+    "train_samples": 1
+}

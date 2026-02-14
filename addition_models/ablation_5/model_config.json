@@ -1,0 +1,14 @@
+{
+    "vocab_size": 13,
+    "dim": 8,
+    "dropout": 0.0,
+    "n_layers": 8,
+    "n_heads": 4,
+    "n_kv_heads": 4,
+    "max_seq_len": 20,
+    "layer_norm_eps": 1e-05,
+    "multiple_of": 32,
+    "hidden_dim": null,
+    "position_embedding_type": "rotary",
+    "use_cache": true
+}
